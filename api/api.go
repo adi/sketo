@@ -1233,7 +1233,7 @@ func Init(apiMux *mux.Router) error {
 		rw.WriteHeader(200)
 		jsonEnc := json.NewEncoder(rw)
 		err := jsonEnc.Encode(version{
-			Version: "v0.0.1-sketo",
+			Version: "v0.1.0",
 		})
 		if err != nil {
 			rw.WriteHeader(500)
