@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -56,16 +58,67 @@ type version struct {
 	Version string `json:"version"`
 }
 
-func filterDbPrefix(flavor, subject, resource, action string) string {
-	return fmt.Sprintf("%s/p/s/%s/r/%s/a/%s/", flavor, subject, resource, action)
+func filterDbPrefix(subject, resource, action string) string {
+	return fmt.Sprintf("s/%s/r/%s/a/%s/", subject, resource, action)
 }
 
-func idDbPrefix(flavor, subject, resource, action, id string) string {
-	return fmt.Sprintf("%s/p/s/%s/r/%s/a/%s/i/%s/", flavor, subject, resource, action, id)
+func idDbPrefix(subject, resource, action, id string) string {
+	return fmt.Sprintf("s/%s/r/%s/a/%s/i/%s/", subject, resource, action, id)
 }
 
-func docDbPrefix(flavor, id string) string {
-	return fmt.Sprintf("%s/p/i/%s/", flavor, id)
+func docDbPrefix(id string) string {
+	return fmt.Sprintf("i/%s/", id)
+}
+
+func basePrefix(flavor string) string {
+	return fmt.Sprintf("%s/p/", flavor)
+}
+
+// Test ..
+func Test() {
+	headers := map[string][]string{
+		"Content-Type": {"application/json"},
+		"Accept":       {"application/json"},
+	}
+	for i := 0; i < 10000; i++ {
+
+		if i%100 == 0 {
+			log.Printf("UPSERT: %d\n", i)
+		}
+		item := oryAccessControlPolicy{
+			ID:          fmt.Sprintf("%dxxx8ea01-3f24-4e0e-acae-af3501b5c487", i),
+			Description: "[Candidate/CV]: Update, View, Delete CV Id=8924317 for candidate Id=4893180",
+			Subjects: []string{
+				"ejobs:account:id:772f00b6-4151-11eb-8cee-d2eaac4f383e",
+			},
+			Resources: []string{
+				"ejobs:candidate:id:4893180:cvs:id:8924317",
+			},
+			Actions: []string{
+				"view", "update", "delete",
+			},
+			Effect: "allow",
+		}
+
+		body, err := json.Marshal(item)
+		if err != nil {
+			panic(err)
+		}
+
+		req, err := http.NewRequest("PUT", "http://127.0.0.1:4466/engines/acp/ory/exact/policies", bytes.NewBuffer(body))
+		req.Header = headers
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			panic(errors.New("Non-200 status"))
+		}
+	}
+
 }
 
 // Init sets up the sketo API HTTP endpoints
@@ -97,7 +150,7 @@ func Init(apiMux *mux.Router) error {
 		spew.Dump(flavor)
 		spew.Dump(body)
 		rw.Header().Set("Content-Type", "application/json")
-		err = acpDB.Get("test", func(value []byte) error {
+		err = acpDB.Get(basePrefix(flavor), "test", func(value []byte) error {
 			rw.WriteHeader(200)
 			jsonEnc := json.NewEncoder(rw)
 			err := jsonEnc.Encode(authorizationResult{
@@ -146,7 +199,7 @@ func Init(apiMux *mux.Router) error {
 		resource := r.FormValue("resource")
 		action := r.FormValue("action")
 
-		err = acpDB.List(filterDbPrefix(flavor, subject, resource, action), offset, limit, func(keys [][]byte, values [][]byte) error {
+		err = acpDB.List(basePrefix(flavor), filterDbPrefix(subject, resource, action), offset, limit, func(keys []string, values [][]byte) error {
 			rw.Header().Add("Content-Type", "application/json")
 			rw.WriteHeader(200)
 			ret := make([]oryAccessControlPolicy, 0, len(values))
@@ -191,8 +244,8 @@ func Init(apiMux *mux.Router) error {
 		id := body.ID
 
 		// Save doc
-		idPrefix := docDbPrefix(flavor, id)
-		err = acpDB.Set(idPrefix, body)
+		docPrefix := docDbPrefix(id)
+		err = acpDB.Set(basePrefix(flavor), docPrefix, body)
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
@@ -204,26 +257,26 @@ func Init(apiMux *mux.Router) error {
 		for _, subject := range body.Subjects {
 			for _, resource := range body.Resources {
 				for _, action := range body.Actions {
-					prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, action, id))
+					prefixes = append(prefixes, idDbPrefix(subject, resource, action, id))
 				}
-				prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, "", id))
+				prefixes = append(prefixes, idDbPrefix(subject, resource, "", id))
 			}
 			for _, action := range body.Actions {
-				prefixes = append(prefixes, idDbPrefix(flavor, subject, "", action, id))
+				prefixes = append(prefixes, idDbPrefix(subject, "", action, id))
 			}
-			prefixes = append(prefixes, idDbPrefix(flavor, subject, "", "", id))
+			prefixes = append(prefixes, idDbPrefix(subject, "", "", id))
 		}
 		for _, resource := range body.Resources {
 			for _, action := range body.Actions {
-				prefixes = append(prefixes, idDbPrefix(flavor, "", resource, action, id))
+				prefixes = append(prefixes, idDbPrefix("", resource, action, id))
 			}
-			prefixes = append(prefixes, idDbPrefix(flavor, "", resource, "", id))
+			prefixes = append(prefixes, idDbPrefix("", resource, "", id))
 		}
 		for _, action := range body.Actions {
-			prefixes = append(prefixes, idDbPrefix(flavor, "", "", action, id))
+			prefixes = append(prefixes, idDbPrefix("", "", action, id))
 		}
-		prefixes = append(prefixes, idDbPrefix(flavor, "", "", "", id))
-		err = acpDB.SetManyRefs(prefixes, idPrefix)
+		prefixes = append(prefixes, idDbPrefix("", "", "", id))
+		err = acpDB.SetManyRefs(basePrefix(flavor), prefixes, "")
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
@@ -248,7 +301,7 @@ func Init(apiMux *mux.Router) error {
 		flavor := params["flavor"]
 		id := params["id"]
 
-		err = acpDB.Get(docDbPrefix(flavor, id), func(value []byte) error {
+		err = acpDB.Get(basePrefix(flavor), docDbPrefix(id), func(value []byte) error {
 			rw.Header().Add("Content-Type", "application/json")
 			rw.WriteHeader(200)
 			rw.Write(value)
@@ -278,7 +331,7 @@ func Init(apiMux *mux.Router) error {
 		var subjects []string
 		var resources []string
 		var actions []string
-		err = acpDB.Get(docDbPrefix(flavor, id), func(value []byte) error {
+		err = acpDB.Get(basePrefix(flavor), docDbPrefix(id), func(value []byte) error {
 			rw.Header().Add("Content-Type", "application/json")
 			rw.WriteHeader(200)
 			var tmpBody oryAccessControlPolicy
@@ -319,8 +372,8 @@ func Init(apiMux *mux.Router) error {
 		}
 
 		// Delete doc
-		idPrefix := docDbPrefix(flavor, id)
-		err = acpDB.Del(idPrefix)
+		idPrefix := docDbPrefix(id)
+		err = acpDB.Del(basePrefix(flavor), idPrefix)
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
@@ -333,26 +386,26 @@ func Init(apiMux *mux.Router) error {
 			for _, subject := range subjects {
 				for _, resource := range resources {
 					for _, action := range actions {
-						prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, action, id))
+						prefixes = append(prefixes, idDbPrefix(subject, resource, action, id))
 					}
-					prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, "", id))
+					prefixes = append(prefixes, idDbPrefix(subject, resource, "", id))
 				}
 				for _, action := range actions {
-					prefixes = append(prefixes, idDbPrefix(flavor, subject, "", action, id))
+					prefixes = append(prefixes, idDbPrefix(subject, "", action, id))
 				}
-				prefixes = append(prefixes, idDbPrefix(flavor, subject, "", "", id))
+				prefixes = append(prefixes, idDbPrefix(subject, "", "", id))
 			}
 			for _, resource := range resources {
 				for _, action := range actions {
-					prefixes = append(prefixes, idDbPrefix(flavor, "", resource, action, id))
+					prefixes = append(prefixes, idDbPrefix("", resource, action, id))
 				}
-				prefixes = append(prefixes, idDbPrefix(flavor, "", resource, "", id))
+				prefixes = append(prefixes, idDbPrefix("", resource, "", id))
 			}
 			for _, action := range actions {
-				prefixes = append(prefixes, idDbPrefix(flavor, "", "", action, id))
+				prefixes = append(prefixes, idDbPrefix("", "", action, id))
 			}
-			prefixes = append(prefixes, idDbPrefix(flavor, "", "", "", id))
-			err = acpDB.DelManyRefs(prefixes)
+			prefixes = append(prefixes, idDbPrefix("", "", "", id))
+			err = acpDB.DelManyRefs(basePrefix(flavor), prefixes)
 			if err != nil {
 				rw.WriteHeader(500)
 				rw.Write([]byte("Server error\n"))
