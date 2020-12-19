@@ -481,6 +481,102 @@ func Init(apiMux *mux.Router) error {
 
 	}).Methods("PUT")
 
+	// upsertOryAccessControlPolicies
+	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/policies/batch", func(rw http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") != "application/json" {
+			rw.WriteHeader(400)
+			rw.Write([]byte(fmt.Sprintf(`Bad request (content type "%s" not allowed on this endpoint; only "application/json" is valid)`, r.Header.Get("Content-Type"))))
+			return
+		}
+		params := mux.Vars(r)
+		flavor := params["flavor"]
+		var bodies []oryAccessControlPolicy
+		jsonDec := json.NewDecoder(r.Body)
+		err := jsonDec.Decode(&bodies)
+		if err != nil {
+			rw.WriteHeader(400)
+			rw.Write([]byte("Couldn't decode body\n"))
+			return
+		}
+
+		for _, body := range bodies {
+			if body.ID == "" {
+				genID, err := uuid.NewUUID()
+				if err != nil {
+					rw.WriteHeader(500)
+					rw.Write([]byte("Couldn't generate ID\n"))
+					return
+				}
+				body.ID = genID.String()
+			}
+
+			id := body.ID
+
+			// Save doc
+			docPrefix := docSuffix(id)
+			err = acpDB.Set(policyBasePrefix(flavor), docPrefix, body)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+			// Save indexes to doc
+			suffixes := make([]string, 0)
+			for _, subject := range body.Subjects {
+				for _, resource := range body.Resources {
+					for _, action := range body.Actions {
+						suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+					}
+					suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+				}
+				for _, action := range body.Actions {
+					suffixes = append(suffixes, policySuffix(subject, "", action, id))
+				}
+				suffixes = append(suffixes, policySuffix(subject, "", "", id))
+			}
+			for _, resource := range body.Resources {
+				for _, action := range body.Actions {
+					suffixes = append(suffixes, policySuffix("", resource, action, id))
+				}
+				suffixes = append(suffixes, policySuffix("", resource, "", id))
+			}
+			for _, action := range body.Actions {
+				suffixes = append(suffixes, policySuffix("", "", action, id))
+			}
+			suffixes = append(suffixes, policySuffix("", "", "", id))
+			err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+			switch flavor {
+			case "regex":
+				CntRegexPolicies++
+			case "glob":
+				CntGlobPolicies++
+			case "exact":
+				CntExactPolicies++
+			}
+
+		}
+
+		rw.Header().Add("Content-Type", "application/json")
+		jsonEnc := json.NewEncoder(rw)
+		rw.WriteHeader(200)
+		err = jsonEnc.Encode(map[string]interface{}{
+			"total_imported": len(bodies),
+		})
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+
+	}).Methods("PUT")
+
 	// getOryAccessControlPolicy
 	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/policies/{id}", func(rw http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
@@ -732,6 +828,84 @@ func Init(apiMux *mux.Router) error {
 			CntGlobPolicies++
 		case "exact":
 			CntExactPolicies++
+		}
+
+	}).Methods("PUT")
+
+	// Upsert many ORY Access Control Policy Roles
+	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/roles/batch", func(rw http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") != "application/json" {
+			rw.WriteHeader(400)
+			rw.Write([]byte(fmt.Sprintf(`Bad request (content type "%s" not allowed on this endpoint; only "application/json" is valid)`, r.Header.Get("Content-Type"))))
+			return
+		}
+		params := mux.Vars(r)
+		flavor := params["flavor"]
+		var bodies []oryAccessControlPolicyRole
+		jsonDec := json.NewDecoder(r.Body)
+		err := jsonDec.Decode(&bodies)
+		if err != nil {
+			rw.WriteHeader(400)
+			rw.Write([]byte("Couldn't decode body\n"))
+			return
+		}
+
+		for _, body := range bodies {
+			if body.ID == "" {
+				genID, err := uuid.NewUUID()
+				if err != nil {
+					rw.WriteHeader(500)
+					rw.Write([]byte("Couldn't generate ID\n"))
+					return
+				}
+				body.ID = genID.String()
+			}
+
+			id := body.ID
+
+			// Save doc
+			docPrefix := docSuffix(id)
+			err = acpDB.Set(roleBasePrefix(flavor), docPrefix, body)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+			// Save indexes to doc
+			suffixes := make([]string, 0)
+			for _, member := range body.Members {
+				suffixes = append(suffixes, roleSuffix(member, id))
+			}
+			suffixes = append(suffixes, roleSuffix("", id))
+			err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+			switch flavor {
+			case "regex":
+				CntRegexPolicies++
+			case "glob":
+				CntGlobPolicies++
+			case "exact":
+				CntExactPolicies++
+			}
+
+		}
+
+		rw.Header().Add("Content-Type", "application/json")
+		jsonEnc := json.NewEncoder(rw)
+		rw.WriteHeader(200)
+		err = jsonEnc.Encode(map[string]interface{}{
+			"total_imported": len(bodies),
+		})
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
 		}
 
 	}).Methods("PUT")
