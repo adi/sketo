@@ -58,11 +58,12 @@ func (db *DB) Set(prefix string, key string, value interface{}) error {
 	})
 }
 
-// SetManyRefs ..
-func (db *DB) SetManyRefs(prefix string, keys []string, ref string) error {
+// RefMany ..
+func (db *DB) RefMany(prefix string, keys []string) error {
+	nothing := make([]byte, 0)
 	return db.b.Update(func(txn *badger.Txn) error {
 		for _, key := range keys {
-			err := txn.Set([]byte(prefix+key), []byte(ref))
+			err := txn.Set([]byte(prefix+key), nothing)
 			if err != nil {
 				return err
 			}

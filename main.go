@@ -19,7 +19,8 @@ func main() {
 	flag.Parse()
 
 	if test != nil && *test == true {
-		api.Test()
+		api.TestPolicies()
+		api.TestRoles()
 		os.Exit(0)
 	}
 	log.Printf("Starting...")
