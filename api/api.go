@@ -523,20 +523,30 @@ func Init(apiMux *mux.Router) error {
 				}
 				body.ID = genID.String()
 			}
+		}
 
+		// Group docs
+		bodiesLen := len(bodies)
+		policyBasePrefixCached := policyBasePrefix(flavor)
+		abstractBodies := make([]interface{}, bodiesLen)
+		docPrefixes := make([]string, bodiesLen)
+		for i, body := range bodies {
+			abstractBodies[i] = body
+			docPrefixes[i] = docSuffix(body.ID)
+		}
+
+		// Save docs
+		err = acpDB.SetMany(policyBasePrefixCached, docPrefixes, abstractBodies)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+
+		suffixes := make([]string, 0)
+		for _, body := range bodies {
 			id := body.ID
-
-			// Save doc
-			docPrefix := docSuffix(id)
-			err = acpDB.Set(policyBasePrefix(flavor), docPrefix, body)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
-			}
-
 			// Save indexes to doc
-			suffixes := make([]string, 0)
 			for _, subject := range body.Subjects {
 				for _, resource := range body.Resources {
 					for _, action := range body.Actions {
@@ -559,22 +569,21 @@ func Init(apiMux *mux.Router) error {
 				suffixes = append(suffixes, policySuffix("", "", action, id))
 			}
 			suffixes = append(suffixes, policySuffix("", "", "", id))
-			err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
-			}
+		}
+		err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
 
-			switch flavor {
-			case "regex":
-				CntRegexPolicies++
-			case "glob":
-				CntGlobPolicies++
-			case "exact":
-				CntExactPolicies++
-			}
-
+		switch flavor {
+		case "regex":
+			CntRegexPolicies += int64(bodiesLen)
+		case "glob":
+			CntGlobPolicies += int64(bodiesLen)
+		case "exact":
+			CntExactPolicies += int64(bodiesLen)
 		}
 
 		rw.Header().Add("Content-Type", "application/json")
@@ -1247,7 +1256,7 @@ func Init(apiMux *mux.Router) error {
 		rw.WriteHeader(200)
 		jsonEnc := json.NewEncoder(rw)
 		err := jsonEnc.Encode(version{
-			Version: "v0.1.2",
+			Version: "v0.1.4",
 		})
 		if err != nil {
 			rw.WriteHeader(500)

@@ -16,4 +16,5 @@ FROM alpine:3.12.0 as bin
 
 COPY --from=build /out/go-app /bin/sketo
 ENV STORAGE_DIR=/storage
+ENV GOMAXPROCS=128
 ENTRYPOINT ["/bin/sketo"]

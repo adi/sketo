@@ -63,18 +63,35 @@ func (db *DB) Set(prefix string, key string, value interface{}) error {
 	})
 }
 
+// SetMany ..
+func (db *DB) SetMany(prefix string, keys []string, values []interface{}) error {
+	wb := db.b.NewWriteBatch()
+	defer wb.Cancel()
+	for i, key := range keys {
+		encoded, err := json.Marshal(values[i])
+		if err != nil {
+			return err
+		}
+		err = wb.Set([]byte(prefix+key), encoded) // Will create txns as needed.
+		if err != nil {
+			return err
+		}
+	}
+	return wb.Flush() // Wait for all txns to finish.
+}
+
 // RefMany ..
 func (db *DB) RefMany(prefix string, keys []string) error {
 	nothing := make([]byte, 0)
-	return db.b.Update(func(txn *badger.Txn) error {
-		for _, key := range keys {
-			err := txn.Set([]byte(prefix+key), nothing)
-			if err != nil {
-				return err
-			}
+	wb := db.b.NewWriteBatch()
+	defer wb.Cancel()
+	for _, key := range keys {
+		err := wb.Set([]byte(prefix+key), nothing) // Will create txns as needed.
+		if err != nil {
+			return err
 		}
-		return nil
-	})
+	}
+	return wb.Flush() // Wait for all txns to finish.
 }
 
 // Del ..
