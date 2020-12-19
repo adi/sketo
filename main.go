@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -15,14 +14,16 @@ import (
 )
 
 func main() {
-	test := flag.Bool("test", false, "Adds one million documents")
-	flag.Parse()
 
-	if test != nil && *test == true {
-		api.TestPolicies()
-		api.TestRoles()
-		os.Exit(0)
-	}
+	// test := flag.Bool("test", false, "Adds one million documents")
+	// flag.Parse()
+
+	// if test != nil && *test == true {
+	// 	api.TestPolicies()
+	// 	api.TestRoles()
+	// 	os.Exit(0)
+	// }
+
 	log.Printf("Starting...")
 	ctx, cancel := context.WithCancel(context.Background())
 
