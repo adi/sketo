@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 
@@ -237,8 +238,14 @@ func ReloadCounters(acpDB *db.DB) error {
 // Init sets up the sketo API HTTP endpoints
 func Init(apiMux *mux.Router) error {
 
+	// Load from ENV the location of the DB
+	storageDir := path.Join(".", "storage")
+	if envVar := os.Getenv("STORAGE_DIR"); envVar != "" {
+		storageDir = envVar
+	}
+
 	// Start ACP DB
-	acpDB, err := db.NewDB(path.Join(".", "storage"))
+	acpDB, err := db.NewDB(storageDir)
 	if err != nil {
 		return err
 	}
