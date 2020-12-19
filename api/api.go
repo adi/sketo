@@ -93,13 +93,12 @@ func TestPolicies() {
 		"Content-Type": {"application/json"},
 		"Accept":       {"application/json"},
 	}
-	for i := 0; i < 5000; i++ {
 
-		if i%100 == 0 {
-			log.Printf("UPSERT: %d\n", i)
-		}
+	batchSize := 500
+
+	var items []oryAccessControlPolicy
+	for j := 0; j < batchSize; j++ {
 		item := oryAccessControlPolicy{
-			ID:          fmt.Sprintf("%dxxx8ea01-3f24-4e0e-acae-af3501b5c487", i),
 			Description: "[Candidate/CV]: Update, View, Delete CV Id=8924317 for candidate Id=4893180",
 			Subjects: []string{
 				"ejobs:account:id:772f00b6-4151-11eb-8cee-d2eaac4f383e",
@@ -112,13 +111,21 @@ func TestPolicies() {
 			},
 			Effect: "allow",
 		}
+		items = append(items, item)
+	}
 
-		body, err := json.Marshal(item)
-		if err != nil {
-			panic(err)
+	body, err := json.Marshal(items)
+	if err != nil {
+		panic(err)
+	}
+
+	for i := 0; i < batchSize*10; i += batchSize {
+
+		if i%100 == 0 {
+			log.Printf("UPSERT: %d\n", i)
 		}
 
-		req, err := http.NewRequest("PUT", "http://127.0.0.1:4466/engines/acp/ory/exact/policies", bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "http://keto.iurie-safonov-001.svc.i.ejbs.ro:4466/engines/acp/ory/exact/policies/batch", bytes.NewBuffer(body))
 		req.Header = headers
 
 		client := &http.Client{}
@@ -140,25 +147,32 @@ func TestRoles() {
 		"Content-Type": {"application/json"},
 		"Accept":       {"application/json"},
 	}
-	for i := 0; i < 5000; i++ {
 
-		if i%100 == 0 {
-			log.Printf("UPSERT: %d\n", i)
-		}
+	batchSize := 500
+
+	var items []oryAccessControlPolicyRole
+	for j := 0; j < batchSize; j++ {
 		item := oryAccessControlPolicyRole{
-			ID:          fmt.Sprintf("%dxxx8ea01-3f24-4e0e-acae-af3501b5c487", i),
 			Description: "[Candidate/CV]: Update, View, Delete CV Id=8924317 for candidate Id=4893180",
 			Members: []string{
 				"ejobs:account:id:772f00b6-4151-11eb-8cee-d2eaac4f383e",
 			},
 		}
+		items = append(items, item)
+	}
 
-		body, err := json.Marshal(item)
-		if err != nil {
-			panic(err)
+	body, err := json.Marshal(items)
+	if err != nil {
+		panic(err)
+	}
+
+	for i := 0; i < batchSize*10; i += batchSize {
+
+		if i%100 == 0 {
+			log.Printf("UPSERT: %d\n", i)
 		}
 
-		req, err := http.NewRequest("PUT", "http://127.0.0.1:4466/engines/acp/ory/exact/roles", bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "http://keto.iurie-safonov-001.svc.i.ejbs.ro:4466/engines/acp/ory/exact/roles/batch", bytes.NewBuffer(body))
 		req.Header = headers
 
 		client := &http.Client{}
@@ -823,11 +837,11 @@ func Init(apiMux *mux.Router) error {
 
 		switch flavor {
 		case "regex":
-			CntRegexPolicies++
+			CntRegexRoles++
 		case "glob":
-			CntGlobPolicies++
+			CntGlobRoles++
 		case "exact":
-			CntExactPolicies++
+			CntExactRoles++
 		}
 
 	}).Methods("PUT")
@@ -887,11 +901,11 @@ func Init(apiMux *mux.Router) error {
 
 			switch flavor {
 			case "regex":
-				CntRegexPolicies++
+				CntRegexRoles++
 			case "glob":
-				CntGlobPolicies++
+				CntGlobRoles++
 			case "exact":
-				CntExactPolicies++
+				CntExactRoles++
 			}
 
 		}
@@ -1233,7 +1247,7 @@ func Init(apiMux *mux.Router) error {
 		rw.WriteHeader(200)
 		jsonEnc := json.NewEncoder(rw)
 		err := jsonEnc.Encode(version{
-			Version: "v0.1.1",
+			Version: "v0.1.2",
 		})
 		if err != nil {
 			rw.WriteHeader(500)
