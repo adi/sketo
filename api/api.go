@@ -125,7 +125,7 @@ func TestPolicies() {
 			log.Printf("UPSERT: %d\n", i)
 		}
 
-		req, err := http.NewRequest("PUT", "http://keto.iurie-safonov-001.svc.i.ejbs.ro:4466/engines/acp/ory/exact/policies/batch", bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "http://127.0.0.1:4466/engines/acp/ory/exact/policies/batch", bytes.NewBuffer(body))
 		req.Header = headers
 
 		client := &http.Client{}
@@ -172,7 +172,7 @@ func TestRoles() {
 			log.Printf("UPSERT: %d\n", i)
 		}
 
-		req, err := http.NewRequest("PUT", "http://keto.iurie-safonov-001.svc.i.ejbs.ro:4466/engines/acp/ory/exact/roles/batch", bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "http://127.0.0.1:4466/engines/acp/ory/exact/roles/batch", bytes.NewBuffer(body))
 		req.Header = headers
 
 		client := &http.Client{}
