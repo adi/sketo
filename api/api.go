@@ -146,7 +146,7 @@ func Init(apiMux *mux.Router) error {
 		resource := r.FormValue("resource")
 		action := r.FormValue("action")
 
-		err = acpDB.List(filterDbPrefix(flavor, subject, resource, action), offset, limit, func(keys []string, values [][]byte) error {
+		err = acpDB.List(filterDbPrefix(flavor, subject, resource, action), offset, limit, func(keys [][]byte, values [][]byte) error {
 			rw.Header().Add("Content-Type", "application/json")
 			rw.WriteHeader(200)
 			ret := make([]oryAccessControlPolicy, 0, len(values))
@@ -208,8 +208,6 @@ func Init(apiMux *mux.Router) error {
 				}
 				prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, "", id))
 			}
-		}
-		for _, subject := range body.Subjects {
 			for _, action := range body.Actions {
 				prefixes = append(prefixes, idDbPrefix(flavor, subject, "", action, id))
 			}
@@ -225,7 +223,7 @@ func Init(apiMux *mux.Router) error {
 			prefixes = append(prefixes, idDbPrefix(flavor, "", "", action, id))
 		}
 		prefixes = append(prefixes, idDbPrefix(flavor, "", "", "", id))
-		err = acpDB.SetBulk(prefixes, idPrefix)
+		err = acpDB.SetManyRefs(prefixes, idPrefix)
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
@@ -245,10 +243,126 @@ func Init(apiMux *mux.Router) error {
 	}).Methods("PUT")
 
 	// getOryAccessControlPolicy
-	// TODO
+	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/policies/{id}", func(rw http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		flavor := params["flavor"]
+		id := params["id"]
+
+		err = acpDB.Get(docDbPrefix(flavor, id), func(value []byte) error {
+			rw.Header().Add("Content-Type", "application/json")
+			rw.WriteHeader(200)
+			rw.Write(value)
+			return nil
+		})
+		if err != nil {
+			if err == db.ErrKeyNotFound {
+				rw.WriteHeader(404)
+				rw.Write([]byte("Not found\n"))
+				return
+			}
+			log.Printf("Error getting ACP: %v\n", err)
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+
+	}).Methods("GET")
 
 	// deleteOryAccessControlPolicy
-	// TODO
+	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/policies/{id}", func(rw http.ResponseWriter, r *http.Request) {
+		params := mux.Vars(r)
+		flavor := params["flavor"]
+		id := params["id"]
+
+		// Get doc
+		var subjects []string
+		var resources []string
+		var actions []string
+		err = acpDB.Get(docDbPrefix(flavor, id), func(value []byte) error {
+			rw.Header().Add("Content-Type", "application/json")
+			rw.WriteHeader(200)
+			var tmpBody oryAccessControlPolicy
+			err := json.Unmarshal(value, &tmpBody)
+			if err != nil {
+				return fmt.Errorf("Couldn't decode body: %w", err)
+			}
+			for _, s := range tmpBody.Subjects {
+				sbytes := []byte(s)
+				scopy := make([]byte, 0, len(sbytes))
+				copy(scopy, sbytes)
+				subjects = append(subjects, string(scopy))
+			}
+			for _, r := range tmpBody.Resources {
+				rbytes := []byte(r)
+				rcopy := make([]byte, 0, len(rbytes))
+				copy(rcopy, rbytes)
+				resources = append(resources, string(rcopy))
+			}
+			for _, a := range tmpBody.Actions {
+				abytes := []byte(a)
+				acopy := make([]byte, 0, len(abytes))
+				copy(acopy, abytes)
+				actions = append(actions, string(acopy))
+			}
+			return nil
+		})
+		deleteRefs := true
+		if err != nil {
+			if err == db.ErrKeyNotFound {
+				deleteRefs = false
+			} else {
+				log.Printf("Error getting ACP: %v\n", err)
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+		}
+
+		// Delete doc
+		idPrefix := docDbPrefix(flavor, id)
+		err = acpDB.Del(idPrefix)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+
+		if deleteRefs {
+			// Delete indexes to doc
+			prefixes := make([]string, 0)
+			for _, subject := range subjects {
+				for _, resource := range resources {
+					for _, action := range actions {
+						prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, action, id))
+					}
+					prefixes = append(prefixes, idDbPrefix(flavor, subject, resource, "", id))
+				}
+				for _, action := range actions {
+					prefixes = append(prefixes, idDbPrefix(flavor, subject, "", action, id))
+				}
+				prefixes = append(prefixes, idDbPrefix(flavor, subject, "", "", id))
+			}
+			for _, resource := range resources {
+				for _, action := range actions {
+					prefixes = append(prefixes, idDbPrefix(flavor, "", resource, action, id))
+				}
+				prefixes = append(prefixes, idDbPrefix(flavor, "", resource, "", id))
+			}
+			for _, action := range actions {
+				prefixes = append(prefixes, idDbPrefix(flavor, "", "", action, id))
+			}
+			prefixes = append(prefixes, idDbPrefix(flavor, "", "", "", id))
+			err = acpDB.DelManyRefs(prefixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+		}
+
+		rw.WriteHeader(204)
+
+	}).Methods("DELETE")
 
 	// List ORY Access Control Policy Roles
 	// TODO
