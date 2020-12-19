@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/adi/sketo/db"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -172,6 +173,67 @@ func TestRoles() {
 
 }
 
+// Counters for metrics
+var (
+	CntRegexPolicies           = int64(0)
+	CntGlobPolicies            = int64(0)
+	CntExactPolicies           = int64(0)
+	CntRegexRoles              = int64(0)
+	CntGlobRoles               = int64(0)
+	CntExactRoles              = int64(0)
+	CntAllowRequestsSinceStart = int64(0)
+	CntAllowAcceptedSinceStart = int64(0)
+	CntAllowRefusedSinceStart  = int64(0)
+	CntAllowFailuresSinceStart = int64(0)
+)
+
+// ReloadCounters ..
+func ReloadCounters(acpDB *db.DB) error {
+	err := acpDB.Count(policyBasePrefix("regex"), policyFilter("", "", ""), func(cnt int64) error {
+		CntRegexPolicies = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = acpDB.Count(policyBasePrefix("glob"), policyFilter("", "", ""), func(cnt int64) error {
+		CntGlobPolicies = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = acpDB.Count(policyBasePrefix("exact"), policyFilter("", "", ""), func(cnt int64) error {
+		CntExactPolicies = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = acpDB.Count(roleBasePrefix("regex"), roleFilter(""), func(cnt int64) error {
+		CntRegexRoles = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = acpDB.Count(roleBasePrefix("glob"), roleFilter(""), func(cnt int64) error {
+		CntGlobRoles = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = acpDB.Count(roleBasePrefix("exact"), roleFilter(""), func(cnt int64) error {
+		CntExactRoles = cnt
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Init sets up the sketo API HTTP endpoints
 func Init(apiMux *mux.Router) error {
 
@@ -181,9 +243,32 @@ func Init(apiMux *mux.Router) error {
 		return err
 	}
 
+	err = ReloadCounters(acpDB)
+	if err != nil {
+		return err
+	}
+
+	// Delete everything
+	apiMux.HandleFunc("/engines/acp/ory", func(rw http.ResponseWriter, r *http.Request) {
+		err = acpDB.DelEverything()
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error"))
+			return
+		}
+		err = ReloadCounters(acpDB)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error"))
+			return
+		}
+	}).Methods("DELETE")
+
 	// Check If a Request is Allowed
 	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/allowed", func(rw http.ResponseWriter, r *http.Request) {
+		CntAllowRequestsSinceStart++
 		if r.Header.Get("Content-Type") != "application/json" {
+			CntAllowFailuresSinceStart++
 			rw.WriteHeader(400)
 			rw.Write([]byte(fmt.Sprintf(`Bad request (content type "%s" not allowed on this endpoint; only "application/json" is valid)`, r.Header.Get("Content-Type"))))
 			return
@@ -194,8 +279,28 @@ func Init(apiMux *mux.Router) error {
 		jsonDec := json.NewDecoder(r.Body)
 		err := jsonDec.Decode(&body)
 		if err != nil {
+			CntAllowFailuresSinceStart++
 			rw.WriteHeader(400)
 			rw.Write([]byte("Couldn't decode body"))
+			return
+		}
+
+		if body.Subject == "" || body.Resource == "" || body.Action == "" {
+			rw.Header().Set("Content-Type", "application/json")
+			rw.WriteHeader(200)
+			jsonEnc := json.NewEncoder(rw)
+			err := jsonEnc.Encode(authorizationResult{
+				Allowed: false,
+			})
+			if err != nil {
+				CntAllowFailuresSinceStart++
+				if err != nil {
+					rw.WriteHeader(500)
+					rw.Write([]byte("Server error"))
+					return
+				}
+			}
+			CntAllowRefusedSinceStart++
 			return
 		}
 
@@ -207,7 +312,13 @@ func Init(apiMux *mux.Router) error {
 				Allowed: allowed,
 			})
 			if err != nil {
+				CntAllowFailuresSinceStart++
 				return err
+			}
+			if allowed {
+				CntAllowAcceptedSinceStart++
+			} else {
+				CntAllowRefusedSinceStart++
 			}
 			return nil
 		})
@@ -290,6 +401,16 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
+		if body.ID == "" {
+			genID, err := uuid.NewUUID()
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Couldn't generate ID\n"))
+				return
+			}
+			body.ID = genID.String()
+		}
+
 		id := body.ID
 
 		// Save doc
@@ -340,6 +461,15 @@ func Init(apiMux *mux.Router) error {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
 			return
+		}
+
+		switch flavor {
+		case "regex":
+			CntRegexPolicies++
+		case "glob":
+			CntGlobPolicies++
+		case "exact":
+			CntExactPolicies++
 		}
 
 	}).Methods("PUT")
@@ -458,6 +588,16 @@ func Init(apiMux *mux.Router) error {
 				rw.Write([]byte("Server error\n"))
 				return
 			}
+
+			switch flavor {
+			case "regex":
+				CntRegexPolicies--
+			case "glob":
+				CntGlobPolicies--
+			case "exact":
+				CntExactPolicies--
+			}
+
 		}
 
 		rw.WriteHeader(204)
@@ -534,6 +674,16 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
+		if body.ID == "" {
+			genID, err := uuid.NewUUID()
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Couldn't generate ID\n"))
+				return
+			}
+			body.ID = genID.String()
+		}
+
 		id := body.ID
 
 		// Save doc
@@ -566,6 +716,15 @@ func Init(apiMux *mux.Router) error {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
 			return
+		}
+
+		switch flavor {
+		case "regex":
+			CntRegexPolicies++
+		case "glob":
+			CntGlobPolicies++
+		case "exact":
+			CntExactPolicies++
 		}
 
 	}).Methods("PUT")
@@ -652,6 +811,16 @@ func Init(apiMux *mux.Router) error {
 				rw.Write([]byte("Server error\n"))
 				return
 			}
+
+			switch flavor {
+			case "regex":
+				CntRegexRoles--
+			case "glob":
+				CntGlobRoles--
+			case "exact":
+				CntExactRoles--
+			}
+
 		}
 
 		rw.WriteHeader(204)

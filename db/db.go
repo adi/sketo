@@ -28,6 +28,11 @@ func NewDB(dataDir string) (*DB, error) {
 	}, nil
 }
 
+// DelEverything ..
+func (db *DB) DelEverything() error {
+	return db.b.DropAll()
+}
+
 // Get ..
 func (db *DB) Get(prefix string, key string, valueProcessor func(value []byte) error) error {
 	return db.b.View(func(txn *badger.Txn) error {
@@ -155,5 +160,21 @@ func (db *DB) Test(prefix string, filter string, allowedProcessor func(allowed b
 			return allowedProcessor(true)
 		}
 		return allowedProcessor(false)
+	})
+}
+
+// Count ..
+func (db *DB) Count(prefix string, filter string, countProcessor func(cnt int64) error) error {
+	return db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		prefixBytes := []byte(prefix + filter)
+		opts.Prefix = prefixBytes
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		cnt := int64(0)
+		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+			cnt++
+		}
+		return countProcessor(cnt)
 	})
 }
