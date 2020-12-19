@@ -142,3 +142,18 @@ func (db *DB) List(prefix string, filter string, offset int64, limit int64, valu
 		return valuesProcessor(foundKeys, foundValues)
 	})
 }
+
+// Test ..
+func (db *DB) Test(prefix string, filter string, allowedProcessor func(allowed bool) error) error {
+	return db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		prefixBytes := []byte(prefix + filter)
+		opts.Prefix = prefixBytes
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+			return allowedProcessor(true)
+		}
+		return allowedProcessor(false)
+	})
+}
