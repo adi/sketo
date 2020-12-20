@@ -177,6 +177,9 @@ func matchesOne(flavor string, alternative string, item string) (bool, error) {
 }
 
 func matchesAny(flavor string, alternatives []string, item string) (bool, error) {
+	if item == "" {
+		return true, nil
+	}
 	for _, alternative := range alternatives {
 		r, err := matchesOne(flavor, alternative, item)
 		if err != nil {

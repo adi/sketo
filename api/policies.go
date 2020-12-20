@@ -58,36 +58,65 @@ func listOryAccessControlPolicies(acpDB *db.DB) func(rw http.ResponseWriter, r *
 				jsonEnc := json.NewEncoder(rw)
 				return jsonEnc.Encode(ret)
 			})
-		} else {
-			err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
-				var item oryAccessControlPolicy
-				err := json.Unmarshal(value, &item)
-				if err != nil {
-					return false, err
-				}
-				matchesSubject, err := matchesAny(flavor, item.Subjects, subject)
-				if err != nil {
-					return false, err
-				}
-				matchesResource, err := matchesAny(flavor, item.Resources, resource)
-				if err != nil {
-					return false, err
-				}
-				matchesAction, err := matchesAny(flavor, item.Actions, action)
-				if err != nil {
-					return false, err
-				}
-				matches := matchesSubject && matchesResource && matchesAction
-				return matches, nil
-			})
-		}
-		if err != nil {
-			log.Printf("Error listing ACPs: %v\n", err)
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error\n"))
-			return
-		}
 
+			if err != nil {
+				log.Printf("Error listing ACPs: %v\n", err)
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+		} else {
+			rw.Header().Add("Content-Type", "application/json")
+			rw.WriteHeader(200)
+
+			ret := make([]oryAccessControlPolicy, 0)
+			err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
+				var err error
+				var item oryAccessControlPolicy
+				err = json.Unmarshal(value, &item)
+				if err != nil {
+					return false, err
+				}
+				var include bool
+				include, err = matchesAny(flavor, item.Subjects, subject)
+				if err != nil {
+					return false, err
+				}
+				if include {
+					include, err = matchesAny(flavor, item.Resources, resource)
+					if err != nil {
+						return false, err
+					}
+				}
+				if include {
+					include, err = matchesAny(flavor, item.Actions, action)
+					if err != nil {
+						return false, err
+					}
+				}
+				if include {
+					ret = append(ret, item)
+				}
+				return true, nil
+			})
+			if err != nil {
+				log.Printf("Error listing ACPs: %v\n", err)
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+			jsonEnc := json.NewEncoder(rw)
+			err := jsonEnc.Encode(ret)
+			if err != nil {
+				log.Printf("Error listing ACPs: %v\n", err)
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
+		}
 	}
 }
 
