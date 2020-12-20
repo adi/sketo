@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/davecgh/go-spew/spew"
 	badger "github.com/dgraph-io/badger/v2"
 )
 
@@ -19,7 +18,9 @@ type DB struct {
 
 // NewDB creates or loads a database at folder dataDir
 func NewDB(dataDir string) (*DB, error) {
-	db, err := badger.Open(badger.DefaultOptions(dataDir))
+	opts := badger.DefaultOptions(dataDir)
+	opts.NumVersionsToKeep = 0
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +133,10 @@ func (db *DB) List(prefix string, filter string, offset int64, limit int64, valu
 		opts.Prefix = prefixBytes
 		iter := txn.NewIterator(opts)
 		defer iter.Close()
+		maxOffset := int64(10000)
+		if offset > maxOffset {
+			return errors.New("offset too large (max value is 10000)")
+		}
 		maxLimit := int64(100)
 		if limit == -1 || limit > maxLimit {
 			limit = maxLimit
@@ -148,7 +153,6 @@ func (db *DB) List(prefix string, filter string, offset int64, limit int64, valu
 				break
 			}
 		}
-		spew.Dump(foundKeys)
 		foundValues := make([][]byte, 0, limit)
 		for _, foundKey := range foundKeys {
 			prefixBytes := []byte(prefix + foundKey)
