@@ -169,6 +169,32 @@ func (db *DB) List(prefix string, filter string, offset int64, limit int64, valu
 	})
 }
 
+// Enumerate ..
+func (db *DB) Enumerate(prefix string, enumProcessor func(key string, value []byte) (bool, error)) error {
+	return db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		prefixBytes := []byte(prefix)
+		opts.Prefix = prefixBytes
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+			var cont bool
+			iter.Item().Value(func(val []byte) error {
+				var err error
+				cont, err = enumProcessor(string(iter.Item().Key()), val)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+			if !cont {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
 // Count ..
 func (db *DB) Count(prefix string, filter string, countProcessor func(cnt int64) error) error {
 	return db.b.View(func(txn *badger.Txn) error {

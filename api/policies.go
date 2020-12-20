@@ -42,21 +42,45 @@ func listOryAccessControlPolicies(acpDB *db.DB) func(rw http.ResponseWriter, r *
 		resource := r.FormValue("resource")
 		action := r.FormValue("action")
 
-		err = acpDB.List(policyBasePrefix(flavor), policyFilter(subject, resource, action), offset, limit, func(keys []string, values [][]byte) error {
-			rw.Header().Add("Content-Type", "application/json")
-			rw.WriteHeader(200)
-			ret := make([]oryAccessControlPolicy, 0, len(values))
-			for _, value := range values {
+		if flavor == "exact" {
+			err = acpDB.List(policyBasePrefix(flavor), policyFilter(subject, resource, action), offset, limit, func(keys []string, values [][]byte) error {
+				rw.Header().Add("Content-Type", "application/json")
+				rw.WriteHeader(200)
+				ret := make([]oryAccessControlPolicy, 0, len(values))
+				for _, value := range values {
+					var item oryAccessControlPolicy
+					err := json.Unmarshal(value, &item)
+					if err != nil {
+						return err
+					}
+					ret = append(ret, item)
+				}
+				jsonEnc := json.NewEncoder(rw)
+				return jsonEnc.Encode(ret)
+			})
+		} else {
+			err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
 				var item oryAccessControlPolicy
 				err := json.Unmarshal(value, &item)
 				if err != nil {
-					return err
+					return false, err
 				}
-				ret = append(ret, item)
-			}
-			jsonEnc := json.NewEncoder(rw)
-			return jsonEnc.Encode(ret)
-		})
+				matchesSubject, err := matchesAny(flavor, item.Subjects, subject)
+				if err != nil {
+					return false, err
+				}
+				matchesResource, err := matchesAny(flavor, item.Resources, resource)
+				if err != nil {
+					return false, err
+				}
+				matchesAction, err := matchesAny(flavor, item.Actions, action)
+				if err != nil {
+					return false, err
+				}
+				matches := matchesSubject && matchesResource && matchesAction
+				return matches, nil
+			})
+		}
 		if err != nil {
 			log.Printf("Error listing ACPs: %v\n", err)
 			rw.WriteHeader(500)
@@ -106,35 +130,37 @@ func upsertOryAccessControlPolicy(acpDB *db.DB) func(rw http.ResponseWriter, r *
 			return
 		}
 
-		// Save indexes to doc
-		suffixes := make([]string, 0)
-		for _, subject := range body.Subjects {
+		if flavor == "exact" {
+			// Save indexes to doc
+			suffixes := make([]string, 0)
+			for _, subject := range body.Subjects {
+				for _, resource := range body.Resources {
+					for _, action := range body.Actions {
+						suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+					}
+					suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+				}
+				for _, action := range body.Actions {
+					suffixes = append(suffixes, policySuffix(subject, "", action, id))
+				}
+				suffixes = append(suffixes, policySuffix(subject, "", "", id))
+			}
 			for _, resource := range body.Resources {
 				for _, action := range body.Actions {
-					suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+					suffixes = append(suffixes, policySuffix("", resource, action, id))
 				}
-				suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+				suffixes = append(suffixes, policySuffix("", resource, "", id))
 			}
 			for _, action := range body.Actions {
-				suffixes = append(suffixes, policySuffix(subject, "", action, id))
+				suffixes = append(suffixes, policySuffix("", "", action, id))
 			}
-			suffixes = append(suffixes, policySuffix(subject, "", "", id))
-		}
-		for _, resource := range body.Resources {
-			for _, action := range body.Actions {
-				suffixes = append(suffixes, policySuffix("", resource, action, id))
+			suffixes = append(suffixes, policySuffix("", "", "", id))
+			err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
 			}
-			suffixes = append(suffixes, policySuffix("", resource, "", id))
-		}
-		for _, action := range body.Actions {
-			suffixes = append(suffixes, policySuffix("", "", action, id))
-		}
-		suffixes = append(suffixes, policySuffix("", "", "", id))
-		err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
-		if err != nil {
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error\n"))
-			return
 		}
 
 		rw.Header().Add("Content-Type", "application/json")
@@ -207,40 +233,43 @@ func upsertOryAccessControlPolicies(acpDB *db.DB) func(rw http.ResponseWriter, r
 			return
 		}
 
-		// Group indexes to doc
-		suffixes := make([]string, 0)
-		for _, body := range bodies {
-			id := body.ID
-			for _, subject := range body.Subjects {
+		if flavor == "exact" {
+			// Group indexes to doc
+			suffixes := make([]string, 0)
+			for _, body := range bodies {
+				id := body.ID
+				for _, subject := range body.Subjects {
+					for _, resource := range body.Resources {
+						for _, action := range body.Actions {
+							suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+						}
+						suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+					}
+					for _, action := range body.Actions {
+						suffixes = append(suffixes, policySuffix(subject, "", action, id))
+					}
+					suffixes = append(suffixes, policySuffix(subject, "", "", id))
+				}
 				for _, resource := range body.Resources {
 					for _, action := range body.Actions {
-						suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+						suffixes = append(suffixes, policySuffix("", resource, action, id))
 					}
-					suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+					suffixes = append(suffixes, policySuffix("", resource, "", id))
 				}
 				for _, action := range body.Actions {
-					suffixes = append(suffixes, policySuffix(subject, "", action, id))
+					suffixes = append(suffixes, policySuffix("", "", action, id))
 				}
-				suffixes = append(suffixes, policySuffix(subject, "", "", id))
+				suffixes = append(suffixes, policySuffix("", "", "", id))
 			}
-			for _, resource := range body.Resources {
-				for _, action := range body.Actions {
-					suffixes = append(suffixes, policySuffix("", resource, action, id))
-				}
-				suffixes = append(suffixes, policySuffix("", resource, "", id))
-			}
-			for _, action := range body.Actions {
-				suffixes = append(suffixes, policySuffix("", "", action, id))
-			}
-			suffixes = append(suffixes, policySuffix("", "", "", id))
-		}
 
-		// Save indexes to doc
-		err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
-		if err != nil {
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error\n"))
-			return
+			// Save indexes to doc
+			err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
 		}
 
 		switch flavor {
@@ -330,10 +359,10 @@ func deleteOryAccessControlPolicy(acpDB *db.DB) func(rw http.ResponseWriter, r *
 			}
 			return nil
 		})
-		deleteRefs := true
+		objectFound := true
 		if err != nil {
 			if err == db.ErrKeyNotFound {
-				deleteRefs = false
+				objectFound = false
 			} else {
 				log.Printf("Error getting ACP: %v\n", err)
 				rw.WriteHeader(500)
@@ -351,36 +380,38 @@ func deleteOryAccessControlPolicy(acpDB *db.DB) func(rw http.ResponseWriter, r *
 			return
 		}
 
-		if deleteRefs {
-			// Delete indexes to doc
-			suffixes := make([]string, 0)
-			for _, subject := range subjects {
+		if flavor == "exact" {
+			if objectFound {
+				// Delete indexes to doc
+				suffixes := make([]string, 0)
+				for _, subject := range subjects {
+					for _, resource := range resources {
+						for _, action := range actions {
+							suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+						}
+						suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+					}
+					for _, action := range actions {
+						suffixes = append(suffixes, policySuffix(subject, "", action, id))
+					}
+					suffixes = append(suffixes, policySuffix(subject, "", "", id))
+				}
 				for _, resource := range resources {
 					for _, action := range actions {
-						suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+						suffixes = append(suffixes, policySuffix("", resource, action, id))
 					}
-					suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+					suffixes = append(suffixes, policySuffix("", resource, "", id))
 				}
 				for _, action := range actions {
-					suffixes = append(suffixes, policySuffix(subject, "", action, id))
+					suffixes = append(suffixes, policySuffix("", "", action, id))
 				}
-				suffixes = append(suffixes, policySuffix(subject, "", "", id))
-			}
-			for _, resource := range resources {
-				for _, action := range actions {
-					suffixes = append(suffixes, policySuffix("", resource, action, id))
+				suffixes = append(suffixes, policySuffix("", "", "", id))
+				err = acpDB.DelManyRefs(policyBasePrefix(flavor), suffixes)
+				if err != nil {
+					rw.WriteHeader(500)
+					rw.Write([]byte("Server error\n"))
+					return
 				}
-				suffixes = append(suffixes, policySuffix("", resource, "", id))
-			}
-			for _, action := range actions {
-				suffixes = append(suffixes, policySuffix("", "", action, id))
-			}
-			suffixes = append(suffixes, policySuffix("", "", "", id))
-			err = acpDB.DelManyRefs(policyBasePrefix(flavor), suffixes)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
 			}
 
 			switch flavor {
