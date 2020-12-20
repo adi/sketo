@@ -329,9 +329,23 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
-		err = acpDB.Test(policyBasePrefix(flavor), policyFilter(body.Subject, body.Resource, body.Action), func(allowed bool) error {
+		err = acpDB.List(policyBasePrefix(flavor), policyFilter(body.Subject, body.Resource, body.Action), 0, -1, func(keys []string, values [][]byte) error {
 			rw.Header().Set("Content-Type", "application/json")
 			rw.WriteHeader(200)
+			allowed := false
+			for _, value := range values {
+				var item oryAccessControlPolicy
+				err := json.Unmarshal(value, &item)
+				if err != nil {
+					return err
+				}
+				if item.Effect == "deny" {
+					allowed = false
+					break
+				} else if item.Effect == "allow" {
+					allowed = true
+				}
+			}
 			jsonEnc := json.NewEncoder(rw)
 			err := jsonEnc.Encode(authorizationResult{
 				Allowed: allowed,
