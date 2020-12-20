@@ -527,16 +527,15 @@ func Init(apiMux *mux.Router) error {
 
 		// Group docs
 		bodiesLen := len(bodies)
-		policyBasePrefixCached := policyBasePrefix(flavor)
 		abstractBodies := make([]interface{}, bodiesLen)
-		docPrefixes := make([]string, bodiesLen)
+		docSuffixes := make([]string, bodiesLen)
 		for i, body := range bodies {
 			abstractBodies[i] = body
-			docPrefixes[i] = docSuffix(body.ID)
+			docSuffixes[i] = docSuffix(body.ID)
 		}
 
 		// Save docs
-		err = acpDB.SetMany(policyBasePrefixCached, docPrefixes, abstractBodies)
+		err = acpDB.SetMany(policyBasePrefix(flavor), docSuffixes, abstractBodies)
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error\n"))
