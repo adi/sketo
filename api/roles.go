@@ -40,21 +40,38 @@ func listOryAccessControlPolicyRoles(acpDB *db.DB) func(rw http.ResponseWriter, 
 		}
 		member := r.FormValue("member")
 
-		err = acpDB.List(roleBasePrefix(flavor), roleFilter(member), offset, limit, func(keys []string, values [][]byte) error {
-			rw.Header().Add("Content-Type", "application/json")
-			rw.WriteHeader(200)
-			ret := make([]oryAccessControlPolicyRole, 0, len(values))
-			for _, value := range values {
+		if flavor == "exact" {
+
+			err = acpDB.List(roleBasePrefix(flavor), roleFilter(member), offset, limit, func(keys []string, values [][]byte) error {
+				rw.Header().Add("Content-Type", "application/json")
+				rw.WriteHeader(200)
+				ret := make([]oryAccessControlPolicyRole, 0, len(values))
+				for _, value := range values {
+					var item oryAccessControlPolicyRole
+					err := json.Unmarshal(value, &item)
+					if err != nil {
+						return err
+					}
+					ret = append(ret, item)
+				}
+				jsonEnc := json.NewEncoder(rw)
+				return jsonEnc.Encode(ret)
+			})
+		} else {
+			err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
 				var item oryAccessControlPolicyRole
 				err := json.Unmarshal(value, &item)
 				if err != nil {
-					return err
+					return false, err
 				}
-				ret = append(ret, item)
-			}
-			jsonEnc := json.NewEncoder(rw)
-			return jsonEnc.Encode(ret)
-		})
+				matchesMember, err := matchesAny(flavor, item.Members, member)
+				if err != nil {
+					return false, err
+				}
+				matches := matchesMember
+				return matches, nil
+			})
+		}
 		if err != nil {
 			log.Printf("Error listing ACPs: %v\n", err)
 			rw.WriteHeader(500)
@@ -104,17 +121,19 @@ func upsertOryAccessControlPolicyRole(acpDB *db.DB) func(rw http.ResponseWriter,
 			return
 		}
 
-		// Save indexes to doc
-		suffixes := make([]string, 0)
-		for _, member := range body.Members {
-			suffixes = append(suffixes, roleSuffix(member, id))
-		}
-		suffixes = append(suffixes, roleSuffix("", id))
-		err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
-		if err != nil {
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error\n"))
-			return
+		if flavor == "exact" {
+			// Save indexes to doc
+			suffixes := make([]string, 0)
+			for _, member := range body.Members {
+				suffixes = append(suffixes, roleSuffix(member, id))
+			}
+			suffixes = append(suffixes, roleSuffix("", id))
+			err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
 		}
 
 		rw.Header().Add("Content-Type", "application/json")
@@ -187,22 +206,25 @@ func upsertOryAccessControlPolicyRoles(acpDB *db.DB) func(rw http.ResponseWriter
 			return
 		}
 
-		// Group indexes to doc
-		suffixes := make([]string, 0)
-		for _, body := range bodies {
-			id := body.ID
-			for _, member := range body.Members {
-				suffixes = append(suffixes, roleSuffix(member, id))
+		if flavor == "exact" {
+			// Group indexes to doc
+			suffixes := make([]string, 0)
+			for _, body := range bodies {
+				id := body.ID
+				for _, member := range body.Members {
+					suffixes = append(suffixes, roleSuffix(member, id))
+				}
+				suffixes = append(suffixes, roleSuffix("", id))
 			}
-			suffixes = append(suffixes, roleSuffix("", id))
-		}
 
-		// Save indexes to doc
-		err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
-		if err != nil {
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error\n"))
-			return
+			// Save indexes to doc
+			err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
 		}
 
 		switch flavor {
@@ -278,10 +300,10 @@ func deleteOryAccessControlPolicyRole(acpDB *db.DB) func(rw http.ResponseWriter,
 			}
 			return nil
 		})
-		deleteRefs := true
+		objectFound := true
 		if err != nil {
 			if err == db.ErrKeyNotFound {
-				deleteRefs = false
+				objectFound = false
 			} else {
 				log.Printf("Error getting ACP: %v\n", err)
 				rw.WriteHeader(500)
@@ -299,20 +321,24 @@ func deleteOryAccessControlPolicyRole(acpDB *db.DB) func(rw http.ResponseWriter,
 			return
 		}
 
-		if deleteRefs {
-			// Delete indexes to doc
-			suffixes := make([]string, 0)
-			for _, member := range members {
-				suffixes = append(suffixes, roleSuffix(member, id))
+		if flavor == "exact" {
+			if objectFound {
+				// Delete indexes to doc
+				suffixes := make([]string, 0)
+				for _, member := range members {
+					suffixes = append(suffixes, roleSuffix(member, id))
+				}
+				suffixes = append(suffixes, roleSuffix("", id))
+				err = acpDB.DelManyRefs(roleBasePrefix(flavor), suffixes)
+				if err != nil {
+					rw.WriteHeader(500)
+					rw.Write([]byte("Server error\n"))
+					return
+				}
 			}
-			suffixes = append(suffixes, roleSuffix("", id))
-			err = acpDB.DelManyRefs(roleBasePrefix(flavor), suffixes)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
-			}
+		}
 
+		if objectFound {
 			switch flavor {
 			case "regex":
 				CntRegexRoles--
@@ -321,7 +347,6 @@ func deleteOryAccessControlPolicyRole(acpDB *db.DB) func(rw http.ResponseWriter,
 			case "exact":
 				CntExactRoles--
 			}
-
 		}
 
 		rw.WriteHeader(204)

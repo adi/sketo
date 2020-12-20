@@ -413,7 +413,9 @@ func deleteOryAccessControlPolicy(acpDB *db.DB) func(rw http.ResponseWriter, r *
 					return
 				}
 			}
+		}
 
+		if objectFound {
 			switch flavor {
 			case "regex":
 				CntRegexPolicies--
@@ -422,7 +424,6 @@ func deleteOryAccessControlPolicy(acpDB *db.DB) func(rw http.ResponseWriter, r *
 			case "exact":
 				CntExactPolicies--
 			}
-
 		}
 
 		rw.WriteHeader(204)
