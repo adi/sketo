@@ -513,15 +513,16 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
-		for _, body := range bodies {
-			if body.ID == "" {
+		// Add ids if they were not provided
+		for i := range bodies {
+			if bodies[i].ID == "" {
 				genID, err := uuid.NewUUID()
 				if err != nil {
 					rw.WriteHeader(500)
 					rw.Write([]byte("Couldn't generate ID\n"))
 					return
 				}
-				body.ID = genID.String()
+				bodies[i].ID = genID.String()
 			}
 		}
 
@@ -542,10 +543,10 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
+		// Group indexes to doc
 		suffixes := make([]string, 0)
 		for _, body := range bodies {
 			id := body.ID
-			// Save indexes to doc
 			for _, subject := range body.Subjects {
 				for _, resource := range body.Resources {
 					for _, action := range body.Actions {
@@ -569,6 +570,8 @@ func Init(apiMux *mux.Router) error {
 			}
 			suffixes = append(suffixes, policySuffix("", "", "", id))
 		}
+
+		// Save indexes to doc
 		err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
 		if err != nil {
 			rw.WriteHeader(500)
@@ -872,50 +875,61 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 
-		for _, body := range bodies {
-			if body.ID == "" {
+		// Add ids if they were not provided
+		for i := range bodies {
+			if bodies[i].ID == "" {
 				genID, err := uuid.NewUUID()
 				if err != nil {
 					rw.WriteHeader(500)
 					rw.Write([]byte("Couldn't generate ID\n"))
 					return
 				}
-				body.ID = genID.String()
+				bodies[i].ID = genID.String()
 			}
+		}
 
+		// Group docs
+		bodiesLen := len(bodies)
+		abstractBodies := make([]interface{}, bodiesLen)
+		docSuffixes := make([]string, bodiesLen)
+		for i, body := range bodies {
+			abstractBodies[i] = body
+			docSuffixes[i] = docSuffix(body.ID)
+		}
+
+		// Save docs
+		err = acpDB.SetMany(roleBasePrefix(flavor), docSuffixes, abstractBodies)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+
+		// Group indexes to doc
+		suffixes := make([]string, 0)
+		for _, body := range bodies {
 			id := body.ID
-
-			// Save doc
-			docPrefix := docSuffix(id)
-			err = acpDB.Set(roleBasePrefix(flavor), docPrefix, body)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
-			}
-
-			// Save indexes to doc
-			suffixes := make([]string, 0)
 			for _, member := range body.Members {
 				suffixes = append(suffixes, roleSuffix(member, id))
 			}
 			suffixes = append(suffixes, roleSuffix("", id))
-			err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
-			if err != nil {
-				rw.WriteHeader(500)
-				rw.Write([]byte("Server error\n"))
-				return
-			}
+		}
 
-			switch flavor {
-			case "regex":
-				CntRegexRoles++
-			case "glob":
-				CntGlobRoles++
-			case "exact":
-				CntExactRoles++
-			}
+		// Save indexes to doc
+		err = acpDB.RefMany(roleBasePrefix(flavor), suffixes)
+		if err != nil {
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
 
+		switch flavor {
+		case "regex":
+			CntRegexRoles += int64(bodiesLen)
+		case "glob":
+			CntGlobRoles += int64(bodiesLen)
+		case "exact":
+			CntExactRoles += int64(bodiesLen)
 		}
 
 		rw.Header().Add("Content-Type", "application/json")
