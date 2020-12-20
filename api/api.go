@@ -94,7 +94,9 @@ func TestPolicies() {
 		"Accept":       {"application/json"},
 	}
 
-	batchSize := 500
+	batchSize := 5000
+	batchCount := 100
+	dispayMultiplier := 2
 
 	var items []oryAccessControlPolicy
 	for j := 0; j < batchSize; j++ {
@@ -119,9 +121,9 @@ func TestPolicies() {
 		panic(err)
 	}
 
-	for i := 0; i < batchSize*10; i += batchSize {
+	for i := 0; i < batchSize*batchCount; i += batchSize {
 
-		if i%100 == 0 {
+		if i%(batchSize*dispayMultiplier) == 0 {
 			log.Printf("UPSERT: %d\n", i)
 		}
 
@@ -148,7 +150,9 @@ func TestRoles() {
 		"Accept":       {"application/json"},
 	}
 
-	batchSize := 500
+	batchSize := 5000
+	batchCount := 100
+	dispayMultiplier := 2
 
 	var items []oryAccessControlPolicyRole
 	for j := 0; j < batchSize; j++ {
@@ -166,9 +170,9 @@ func TestRoles() {
 		panic(err)
 	}
 
-	for i := 0; i < batchSize*10; i += batchSize {
+	for i := 0; i < batchSize*batchCount; i += batchSize {
 
-		if i%100 == 0 {
+		if i%(batchSize*dispayMultiplier) == 0 {
 			log.Printf("UPSERT: %d\n", i)
 		}
 
