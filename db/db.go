@@ -153,7 +153,7 @@ func (db *DB) List(prefix string, filter string, offset int64, limit int64, valu
 		}
 		pos := int64(0)
 		foundKeys := make([]string, 0, limit)
-		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+		for iter.Seek(opts.Prefix); iter.ValidForPrefix(opts.Prefix); iter.Next() {
 			if pos >= offset && pos-offset < limit {
 				key := iter.Item().Key()
 				foundKeys = append(foundKeys, string(key[len(prefixBytes):]))
@@ -187,7 +187,7 @@ func (db *DB) Enumerate(prefix string, enumProcessor func(key string, value []by
 		opts.Prefix = prefixBytes
 		iter := txn.NewIterator(opts)
 		defer iter.Close()
-		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+		for iter.Seek(opts.Prefix); iter.ValidForPrefix(opts.Prefix); iter.Next() {
 			var cont bool
 			iter.Item().Value(func(val []byte) error {
 				var err error
@@ -214,7 +214,7 @@ func (db *DB) Count(prefix string, filter string, countProcessor func(cnt int64)
 		iter := txn.NewIterator(opts)
 		defer iter.Close()
 		cnt := int64(0)
-		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+		for iter.Seek(opts.Prefix); iter.ValidForPrefix(opts.Prefix); iter.Next() {
 			cnt++
 		}
 		return countProcessor(cnt)
