@@ -71,7 +71,7 @@ func allowed(acpDB *db.DB) func(rw http.ResponseWriter, r *http.Request) {
 				}
 				jsonEnc := json.NewEncoder(rw)
 				err := jsonEnc.Encode(authorizationResult{
-					Allowed: allowed,
+					Allowed: allowed || JustAllow,
 				})
 				if err != nil {
 					CntAllowFailuresSinceStart++
@@ -139,7 +139,7 @@ func allowed(acpDB *db.DB) func(rw http.ResponseWriter, r *http.Request) {
 
 			jsonEnc := json.NewEncoder(rw)
 			err := jsonEnc.Encode(authorizationResult{
-				Allowed: allowed,
+				Allowed: allowed || JustAllow,
 			})
 			if err != nil {
 				CntAllowFailuresSinceStart++

@@ -16,10 +16,15 @@ import (
 
 func main() {
 
+	justAllow := flag.Bool("justallow", false, "Allows everything")
 	test := flag.Bool("test", false, "Adds one million documents")
 	flag.Parse()
 
-	if test != nil && *test == true {
+	if justAllow != nil && *justAllow {
+		api.JustAllow = *justAllow
+	}
+
+	if test != nil && *test {
 		api.TestPolicies()
 		api.TestRoles()
 		os.Exit(0)

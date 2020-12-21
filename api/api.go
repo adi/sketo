@@ -10,6 +10,9 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// JustAllow ..
+var JustAllow bool
+
 // Init sets up the sketo API HTTP endpoints
 func Init(apiMux *mux.Router) error {
 
