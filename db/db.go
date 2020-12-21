@@ -1,9 +1,11 @@
 package db
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 
 	badger "github.com/dgraph-io/badger/v2"
 )
@@ -209,4 +211,43 @@ func (db *DB) Count(prefix string, filter string, countProcessor func(cnt int64)
 		}
 		return countProcessor(cnt)
 	})
+}
+
+// Fix ..
+func (db *DB) Fix() error {
+	wb := db.b.NewWriteBatch()
+	err := db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		i := 0
+		for iter.Seek(opts.Prefix); iter.Valid(); iter.Next() {
+			iter.Item().Value(func(val []byte) error {
+				if bytes.Contains(val, []byte("account:id")) {
+					wb.Set(iter.Item().Key(), bytes.ReplaceAll(val, []byte("account:id"), []byte("account:uuid")))
+					i++
+					if i%10000 == 0 {
+						wb.Flush()
+						wb.Cancel()
+						wb = db.b.NewWriteBatch()
+						log.Printf("Completed %d\n", i)
+					}
+				}
+				return nil
+			})
+		}
+		log.Printf("Done\n")
+		return nil
+	})
+	if err != nil {
+		wb.Cancel()
+		return err
+	}
+	err = wb.Flush()
+	if err != nil {
+		wb.Cancel()
+		return err
+	}
+	wb.Cancel()
+	return nil
 }

@@ -16,6 +16,7 @@ import (
 
 func main() {
 
+	fix := flag.Bool("fix", false, "Fix")
 	justAllow := flag.Bool("justallow", false, "Allows everything")
 	test := flag.Bool("test", false, "Adds one million documents")
 	flag.Parse()
@@ -27,6 +28,14 @@ func main() {
 	if test != nil && *test {
 		api.TestPolicies()
 		api.TestRoles()
+		os.Exit(0)
+	}
+
+	if fix != nil && *fix {
+		err := api.Fix()
+		if err != nil {
+			log.Panicf("Couldn't fix: %v", err)
+		}
 		os.Exit(0)
 	}
 

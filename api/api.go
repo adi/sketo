@@ -14,6 +14,22 @@ import (
 // JustAllow ..
 var JustAllow bool
 
+// Fix ..
+func Fix() error {
+	storageDir := path.Join(".", "storage")
+	if envVar := os.Getenv("STORAGE_DIR"); envVar != "" {
+		storageDir = envVar
+	}
+
+	// Start ACP DB
+	acpDB, err := db.NewDB(storageDir)
+	if err != nil {
+		return err
+	}
+
+	return acpDB.Fix()
+}
+
 // Init sets up the sketo API HTTP endpoints
 func Init(apiMux *mux.Router) error {
 
