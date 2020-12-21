@@ -8,6 +8,7 @@ import (
 
 	"github.com/adi/sketo/db"
 	"github.com/gorilla/mux"
+	"go.elastic.co/apm/module/apmgorilla"
 )
 
 // JustAllow ..
@@ -33,6 +34,9 @@ func Init(apiMux *mux.Router) error {
 	if err != nil {
 		return err
 	}
+
+	// Instrument for APM
+	apiMux.Use(apmgorilla.Middleware())
 
 	// Add endpoint for deleting everything
 	apiMux.HandleFunc("/engines/acp/ory", func(rw http.ResponseWriter, r *http.Request) {
