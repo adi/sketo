@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	badger "github.com/dgraph-io/badger/v2"
 )
@@ -23,6 +24,15 @@ func NewDB(dataDir string) (*DB, error) {
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+	again:
+		err := db.RunValueLogGC(0.7)
+		if err == nil {
+			goto again
+		}
 	}
 	return &DB{
 		b: db,
