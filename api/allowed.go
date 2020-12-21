@@ -8,6 +8,7 @@ import (
 
 	"github.com/adi/sketo/db"
 	"github.com/gorilla/mux"
+	"go.elastic.co/apm"
 )
 
 // Check If a Request is Allowed
@@ -73,6 +74,9 @@ func allowed(acpDB *db.DB) func(rw http.ResponseWriter, r *http.Request) {
 				err := jsonEnc.Encode(authorizationResult{
 					Allowed: allowed || JustAllow,
 				})
+				tran := apm.TransactionFromContext(r.Context())
+				tran.Context.SetLabel("allowed_computed", allowed)
+				tran.Context.SetLabel("allowed_returned", allowed || JustAllow)
 				if err != nil {
 					CntAllowFailuresSinceStart++
 					return err
@@ -141,6 +145,9 @@ func allowed(acpDB *db.DB) func(rw http.ResponseWriter, r *http.Request) {
 			err := jsonEnc.Encode(authorizationResult{
 				Allowed: allowed || JustAllow,
 			})
+			tran := apm.TransactionFromContext(r.Context())
+			tran.Context.SetLabel("allowed_computed", allowed)
+			tran.Context.SetLabel("allowed_returned", allowed || JustAllow)
 			if err != nil {
 				CntAllowFailuresSinceStart++
 				if err != nil {

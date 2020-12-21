@@ -89,7 +89,7 @@ func Init(apiMux *mux.Router) error {
 		rw.WriteHeader(200)
 		jsonEnc := json.NewEncoder(rw)
 		err := jsonEnc.Encode(version{
-			Version: "v0.3.2",
+			Version: "v0.3.3",
 		})
 		if err != nil {
 			rw.WriteHeader(500)
