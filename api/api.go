@@ -8,6 +8,7 @@ import (
 
 	"github.com/adi/sketo/db"
 	"github.com/gorilla/mux"
+	"go.elastic.co/apm"
 	"go.elastic.co/apm/module/apmgorilla"
 )
 
@@ -36,7 +37,12 @@ func Init(apiMux *mux.Router) error {
 	}
 
 	// Instrument for APM
-	apiMux.Use(apmgorilla.Middleware())
+	tracer, err := apm.NewTracer(apm.DefaultTracer.Service.Name, apm.DefaultTracer.Service.Version)
+	if err != nil {
+		return err
+	}
+	tracer.SetCaptureBody(apm.CaptureBodyAll)
+	apiMux.Use(apmgorilla.Middleware(apmgorilla.WithTracer(tracer)))
 
 	// Add endpoint for deleting everything
 	apiMux.HandleFunc("/engines/acp/ory", func(rw http.ResponseWriter, r *http.Request) {
@@ -83,7 +89,7 @@ func Init(apiMux *mux.Router) error {
 		rw.WriteHeader(200)
 		jsonEnc := json.NewEncoder(rw)
 		err := jsonEnc.Encode(version{
-			Version: "v0.3.1",
+			Version: "v0.3.2",
 		})
 		if err != nil {
 			rw.WriteHeader(500)
