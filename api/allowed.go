@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/adi/sketo/db"
@@ -50,42 +51,111 @@ func allowed(acpDB *db.DB) func(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = acpDB.List(policyBasePrefix(flavor), policyFilter(body.Subject, body.Resource, body.Action), 0, -1, func(keys []string, values [][]byte) error {
-			rw.Header().Set("Content-Type", "application/json")
-			rw.WriteHeader(200)
-			allowed := false
-			for _, value := range values {
-				var item oryAccessControlPolicy
-				err := json.Unmarshal(value, &item)
+		if flavor == "exact" {
+			err = acpDB.List(policyBasePrefix(flavor), policyFilter(body.Subject, body.Resource, body.Action), 0, -1, func(keys []string, values [][]byte) error {
+				rw.Header().Set("Content-Type", "application/json")
+				rw.WriteHeader(200)
+				allowed := false
+				for _, value := range values {
+					var item oryAccessControlPolicy
+					err := json.Unmarshal(value, &item)
+					if err != nil {
+						return err
+					}
+					if item.Effect == "deny" {
+						allowed = false
+						break
+					} else if item.Effect == "allow" {
+						allowed = true
+					}
+				}
+				jsonEnc := json.NewEncoder(rw)
+				err := jsonEnc.Encode(authorizationResult{
+					Allowed: allowed,
+				})
 				if err != nil {
+					CntAllowFailuresSinceStart++
 					return err
 				}
-				if item.Effect == "deny" {
-					allowed = false
-					break
-				} else if item.Effect == "allow" {
-					allowed = true
+				if allowed {
+					CntAllowAcceptedSinceStart++
+				} else {
+					CntAllowRefusedSinceStart++
 				}
+				return nil
+			})
+			if err != nil {
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error"))
+				return
 			}
+
+		} else {
+			rw.Header().Add("Content-Type", "application/json")
+			rw.WriteHeader(200)
+
+			allowed := false
+
+			err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
+				var err error
+				var item oryAccessControlPolicy
+				err = json.Unmarshal(value, &item)
+				if err != nil {
+					return false, err
+				}
+				var include bool
+				include, err = matchesAny(flavor, item.Subjects, body.Subject)
+				if err != nil {
+					return false, err
+				}
+				if include {
+					include, err = matchesAny(flavor, item.Resources, body.Resource)
+					if err != nil {
+						return false, err
+					}
+				}
+				if include {
+					include, err = matchesAny(flavor, item.Actions, body.Action)
+					if err != nil {
+						return false, err
+					}
+				}
+				if include {
+					if item.Effect == "deny" {
+						allowed = false
+						return false, nil
+					} else if item.Effect == "allow" {
+						allowed = true
+					}
+				}
+				return true, nil
+			})
+			if err != nil {
+				log.Printf("Error checking ACPs: %v\n", err)
+				rw.WriteHeader(500)
+				rw.Write([]byte("Server error\n"))
+				return
+			}
+
 			jsonEnc := json.NewEncoder(rw)
 			err := jsonEnc.Encode(authorizationResult{
 				Allowed: allowed,
 			})
 			if err != nil {
 				CntAllowFailuresSinceStart++
-				return err
+				if err != nil {
+					log.Printf("Error checking ACPs: %v\n", err)
+					rw.WriteHeader(500)
+					rw.Write([]byte("Server error\n"))
+					return
+				}
 			}
 			if allowed {
 				CntAllowAcceptedSinceStart++
 			} else {
 				CntAllowRefusedSinceStart++
 			}
-			return nil
-		})
-		if err != nil {
-			rw.WriteHeader(500)
-			rw.Write([]byte("Server error"))
-			return
+
 		}
 	}
 }
