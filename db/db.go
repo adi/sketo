@@ -1,9 +1,11 @@
 package db
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v2"
@@ -121,11 +123,42 @@ func (db *DB) Del(prefix string, key string) error {
 	})
 }
 
+// DelByPrefix ..
+func (db *DB) DelByPrefix(prefix string) error {
+
+	return db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(prefix)
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		wb := db.b.NewWriteBatch()
+		i := 0
+		for iter.Seek(opts.Prefix); iter.ValidForPrefix(opts.Prefix); iter.Next() {
+			i++
+			if i%10000 == 0 {
+				log.Printf("Deleted %d\n", i)
+				err := wb.Flush()
+				if err != nil {
+					return err
+				}
+				wb = db.b.NewWriteBatch()
+			}
+			err := wb.Delete(iter.Item().Key())
+			if err != nil {
+				wb.Cancel()
+				return err
+			}
+		}
+		return wb.Flush()
+	})
+
+}
+
 // DelManyRefs ..
 func (db *DB) DelManyRefs(prefix string, keys []string) error {
 	return db.b.Update(func(txn *badger.Txn) error {
 		for _, key := range keys {
-			err := txn.Delete([]byte(prefix + key))
+			err := txn.Delete([]byte(prefix + key)) // might have to commit manually here
 			if err != nil {
 				if err == badger.ErrKeyNotFound {
 					return nil
@@ -221,4 +254,63 @@ func (db *DB) Count(prefix string, filter string, countProcessor func(cnt int64)
 		}
 		return countProcessor(cnt)
 	})
+}
+
+// Fix ..
+func (db *DB) Fix() error {
+	i := 0
+	keys := make([][]byte, 10000000)
+	vals := make([][]byte, 10000000)
+	err := db.b.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte("exact/po/i/")
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+		j := 0
+		for iter.Seek(opts.Prefix); iter.ValidForPrefix(opts.Prefix); iter.Next() {
+			j++
+			if j%100000 == 0 {
+				log.Printf("Read: %d\n", j)
+			}
+			iter.Item().Value(func(val []byte) error {
+				if bytes.Contains(val, []byte("account:id")) {
+					keys[i] = iter.Item().KeyCopy(nil)
+					vals[i] = bytes.ReplaceAll(val, []byte("account:id"), []byte("account:uuid"))
+					i++
+					if i%10000 == 0 {
+						log.Printf("Selected: %d\n", i)
+					}
+				}
+				return nil
+			})
+		}
+		return nil
+	})
+
+	log.Printf("Done selecting\n")
+
+	wb := db.b.NewWriteBatch()
+	for k := 0; k < i; k++ {
+		err := wb.Set(keys[k], vals[k])
+		if err != nil {
+			wb.Cancel()
+			return err
+		}
+		if k%10000 == 0 {
+			err := wb.Flush()
+			if err != nil {
+				wb.Cancel()
+				return err
+			}
+			log.Printf("Saved: %d\n", k)
+			wb = db.b.NewWriteBatch()
+		}
+	}
+	err = wb.Flush()
+	if err != nil {
+		wb.Cancel()
+		return err
+	}
+	log.Printf("Done saving\n")
+	return nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -14,6 +15,22 @@ import (
 
 // JustAllow ..
 var JustAllow bool
+
+// Fix ..
+func Fix() error {
+	storageDir := path.Join(".", "storage")
+	if envVar := os.Getenv("STORAGE_DIR"); envVar != "" {
+		storageDir = envVar
+	}
+
+	// Start ACP DB
+	acpDB, err := db.NewDB(storageDir)
+	if err != nil {
+		return err
+	}
+
+	return acpDB.Fix()
+}
 
 // Init sets up the sketo API HTTP endpoints
 func Init(apiMux *mux.Router) error {
@@ -46,7 +63,7 @@ func Init(apiMux *mux.Router) error {
 
 	// Add endpoint for deleting everything
 	apiMux.HandleFunc("/engines/acp/ory", func(rw http.ResponseWriter, r *http.Request) {
-		err = acpDB.DelEverything()
+		err := acpDB.DelEverything()
 		if err != nil {
 			rw.WriteHeader(500)
 			rw.Write([]byte("Server error"))
@@ -59,6 +76,71 @@ func Init(apiMux *mux.Router) error {
 			return
 		}
 	}).Methods("DELETE")
+
+	// Add endpoint for deleting everything
+	apiMux.HandleFunc("/engines/acp/ory/exact/reindex", func(rw http.ResponseWriter, r *http.Request) {
+		flavor := "exact"
+		err := acpDB.DelByPrefix(policyBasePrefix(flavor) + "s/")
+		if err != nil {
+			log.Printf("Error deleting by prefix of ACP indexes: %v\n", err)
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+		i := 0
+		err = acpDB.Enumerate(policyBasePrefix(flavor), func(key string, value []byte) (bool, error) {
+			i++
+			if i%10000 == 0 {
+				log.Printf("Reindexed %d\n", i)
+			}
+			var err error
+			var item oryAccessControlPolicy
+			err = json.Unmarshal(value, &item)
+			if err != nil {
+				return false, err
+			}
+			id := item.ID
+
+			// Save indexes to doc
+			suffixes := make([]string, 0)
+			for _, subject := range item.Subjects {
+				for _, resource := range item.Resources {
+					for _, action := range item.Actions {
+						suffixes = append(suffixes, policySuffix(subject, resource, action, id))
+					}
+					suffixes = append(suffixes, policySuffix(subject, resource, "", id))
+				}
+				for _, action := range item.Actions {
+					suffixes = append(suffixes, policySuffix(subject, "", action, id))
+				}
+				suffixes = append(suffixes, policySuffix(subject, "", "", id))
+			}
+			for _, resource := range item.Resources {
+				for _, action := range item.Actions {
+					suffixes = append(suffixes, policySuffix("", resource, action, id))
+				}
+				suffixes = append(suffixes, policySuffix("", resource, "", id))
+			}
+			for _, action := range item.Actions {
+				suffixes = append(suffixes, policySuffix("", "", action, id))
+			}
+			suffixes = append(suffixes, policySuffix("", "", "", id))
+			err = acpDB.RefMany(policyBasePrefix(flavor), suffixes)
+			if err != nil {
+				return false, err
+			}
+
+			return true, nil
+		})
+		if err != nil {
+			log.Printf("Error listing ACPs: %v\n", err)
+			rw.WriteHeader(500)
+			rw.Write([]byte("Server error\n"))
+			return
+		}
+		log.Printf("Done reindexing\n")
+
+	}).Methods("POST")
 
 	// Policies endpoints
 	apiMux.HandleFunc("/engines/acp/ory/{flavor:regex|glob|exact}/allowed", allowed(acpDB)).Methods("POST")
